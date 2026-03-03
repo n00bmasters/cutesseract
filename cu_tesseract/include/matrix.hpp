@@ -10,9 +10,9 @@ class Matrix {
     public:
         Matrix(unsigned rows, unsigned cols);
         ~Matrix();
-
-        float* operator[](unsigned row, unsigned col);
-        const float* operator[](unsigned row, unsigned col) const;
+//Treap &Treap::operator=(const Treap &other) {
+        float operator[](unsigned row, unsigned col);
+        const float operator[](unsigned row, unsigned col) const;
 
         void set(unsigned row, unsigned col, float value);
 };
