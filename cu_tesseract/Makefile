@@ -22,3 +22,8 @@ build/main.o : src/main.cpp
 	$(CXX) -c $< $(CXX_FLAGS) -o $@
 
 
+format:
+	clang-format -i $(SOURCES) treap.hpp
+
+clean:
+	rm -f $(TARGET)
