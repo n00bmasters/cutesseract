@@ -1,20 +1,21 @@
 #ifndef MATRIX_HPP
 #define MATRIX_HPP
 
+#include "types.hpp"
+
 class Matrix {
     private:
         unsigned rows;
         unsigned cols;
-        float* data;    
+        fp32* data;    
 
     public:
         Matrix(unsigned rows, unsigned cols);
         ~Matrix();
-//Treap &Treap::operator=(const Treap &other) {
-        float operator[](unsigned row, unsigned col);
-        const float operator[](unsigned row, unsigned col) const;
 
-        void set(unsigned row, unsigned col, float value);
+        void set(unsigned row, unsigned col, fp32 value);
+        fp32 get(unsigned row, unsigned col) const;
+        void rng_fill();
 };
 
 #endif

@@ -1,20 +1,21 @@
 #include "include/matrix.hpp"
 
 #include <stdexcept>
+#include "include/types.hpp"
 #include <random>
 
-static float sample() { // мб можно границу добавить 
+static fp32 sample() { // мб можно границу добавить 
   std::random_device rd;
   std::mt19937 generator(rd());
   std::uniform_int_distribution<int> dis; 
-  return static_cast<float>(dis(generator));
+  return static_cast<fp32>(dis(generator));
 }
 
 
 Matrix::Matrix(unsigned rows, unsigned cols) {
     this->rows = rows;
     this->cols = cols;
-    this->data = new float[rows * cols];
+    this->data = new fp32[rows * cols];
 }
 
 Matrix::~Matrix() {
