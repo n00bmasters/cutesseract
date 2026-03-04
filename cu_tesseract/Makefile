@@ -23,7 +23,7 @@ $(TARGET): $(OBJECTS)
 	$(LD) $^ -o $@
 
 $(BUILD_DIR)/%.o : src/%.cpp | build
-	$(CXX) -c $< $(CXX_FLAGS) -o $@
+	$(CXX) -Iinclude -c $< $(CXX_FLAGS) -o $@
 
 
 format:
