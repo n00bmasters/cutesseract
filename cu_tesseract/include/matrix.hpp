@@ -5,16 +5,16 @@
 
 class Matrix {
     private:
-        unsigned rows;
-        unsigned cols;
+        std::size_t rows;
+        std::size_t cols;
         fp32* data;    
 
     public:
-        Matrix(unsigned rows, unsigned cols);
+        Matrix(std::size_t rows, std::size_t cols);
         ~Matrix();
 
-        void set(unsigned row, unsigned col, fp32 value);
-        fp32 get(unsigned row, unsigned col) const;
+        void set(std::size_t row, std::size_t col, fp32 value);
+        fp32 get(std::size_t row, std::size_t col) const;
         void rng_fill();
 };
 
