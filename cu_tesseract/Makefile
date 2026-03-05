@@ -3,7 +3,7 @@ NVCC ?= nvcc
 CXX ?= g++
 LD = g++
 
-CXX_FLAGS = -O2 -std=c++20
+CXX_FLAGS = -O2 -std=c++20 -Iinclude
 BUILD_DIR := build
 SOURCES := $(wildcard src/*.cpp)
 OBJECTS := $(patsubst src/%.cpp,$(BUILD_DIR)/%.o,$(SOURCES))
@@ -23,7 +23,7 @@ $(TARGET): $(OBJECTS)
 	$(LD) $^ -o $@
 
 $(BUILD_DIR)/%.o : src/%.cpp | build
-	$(CXX) -Iinclude -c $< $(CXX_FLAGS) -o $@
+	$(CXX) -c $< $(CXX_FLAGS) -o $@
 
 
 format:
