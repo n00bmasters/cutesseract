@@ -10,11 +10,11 @@
 template <typename T>
 class Matrix {
     private:
-        std::size_t rows;
-        std::size_t cols;
+        size_t rows;
+        size_t cols;
         T* data;
 
-        static T sample() {
+        static T sample() {;
             std::random_device rd;
             std::mt19937 generator(rd());
             std::uniform_real_distribution<double> dis(0.0, 1.0);
@@ -22,21 +22,20 @@ class Matrix {
         }
 
     public:
-        Matrix(std::size_t rows, std::size_t cols)
-            : rows(rows), cols(cols), data(new T[rows * cols]) {}
+        Matrix(size_t rows, size_t cols): rows(rows), cols(cols), data(new T[rows * cols]) {}
 
         ~Matrix() {
             delete[] data;
         }
 
-        void set(std::size_t row, std::size_t col, T value) {
+        void set(size_t row, size_t col, T value) {
             if (row >= rows || col >= cols) {
                 throw std::out_of_range("Index out of bounds");
             }
             data[row * cols + col] = value;
         }
 
-        T get(std::size_t row, std::size_t col) const {
+        T get(size_t row, size_t col) const {
             if (row >= rows || col >= cols) {
                 throw std::out_of_range("Index out of bounds");
             }
@@ -44,8 +43,8 @@ class Matrix {
         }
 
         void rng_fill() {
-            for (std::size_t i = 0; i < rows; i++) {
-                for (std::size_t j = 0; j < cols; j++) {
+            for (size_t i = 0; i < rows; i++) {
+                for (size_t j = 0; j < cols; j++) {
                     set(i, j, sample());
                 }
             }

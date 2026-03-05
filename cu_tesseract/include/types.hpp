@@ -4,4 +4,6 @@
 typedef float fp32;
 typedef double fp64;
 
+using std::size_t;
+
 #endif
