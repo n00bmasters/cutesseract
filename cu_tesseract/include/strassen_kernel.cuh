@@ -262,9 +262,9 @@ __host__ void _strassen_rec(const T *A, size_t lda, const T *B, size_t ldb,
 
 template <typename T>
 __host__ void _gemm_strassen(Matrix<T> &A, Matrix<T> &B, Matrix<T> &C) {
-  size_t N = A.shape().first;
-  size_t K = A.shape().second;
-  size_t M = B.shape().second;
+  size_t N = A.get_shape(0);
+  size_t K = A.get_shape(1);
+  size_t M = B.get_shape(1);
 
   size_t S = next_pow2(max3(N, K, M));
 

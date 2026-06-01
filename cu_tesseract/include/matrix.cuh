@@ -1,150 +1,76 @@
-#ifndef MATRIX_HPP
-#define MATRIX_HPP
+#ifndef MATRIX_CUH
+#define MATRIX_CUH
 
-#include <cassert>
-#include <cstddef>
-#include <cuda_runtime.h>
-#include <curand.h>
-#include <iostream>
 #include <random>
-#include <stdexcept>
-#include <string.h>
-#include <utility>
 
 #include "dtypes.cuh"
 #include "utils.cuh"
 #include "MatrixView.cuh"
+#include "tensor.cuh"
 
-enum class DataLayout {
-  ROW_WISE,
-  COL_WISE,
-};
-
-enum class DataDevice {
-  CPU,
-  CUDA,
-};
-
-
-template <typename T> class Matrix {
-  T *cpu_ptr;
-  T *device_ptr;
-
+template <typename T> class Matrix : public Tensor<T> {
   DataLayout layout;
 
-  size_t rows, cols, num_elements;
-  bool foreign_pointer = false;
 public:
-  DataDevice device;
   __host__ Matrix(size_t rows, size_t cols, DataLayout layout,
-                  DataDevice device)
-      : rows(rows), cols(cols), device(device), layout(layout),
-        num_elements(sizeof(T) * rows * cols) {
-
-    if (device == DataDevice::CUDA) {
-      CUDA_CHECK(cudaMalloc(&device_ptr, num_elements));
-      cpu_ptr = nullptr;
-    } else {
-      cpu_ptr = new T[rows * cols];
-      device_ptr = nullptr;
+                  DataDevice target_device)
+      : Tensor<T>({rows, cols}), layout(layout) {
+    if (layout == DataLayout::COL_WISE) {
+        // We need to recompute strides for COL_WISE
+        this->set_col_wise_strides();
+    }
+    if (target_device == DataDevice::CUDA) {
+      this->cuda();
     }
   }
 
-  __host__ ~Matrix() {
-    if (foreign_pointer) return;
+  __host__ Matrix(const Matrix &other) : Tensor<T>(other), layout(other.layout) {}
 
-    if (device == DataDevice::CUDA) {
-      CUDA_CHECK(cudaFree(device_ptr));
-    } else {
-      delete[] cpu_ptr;
-    }
-  }
-
-  __host__ Matrix(const Matrix &other)
-      : rows(other.rows), cols(other.cols), num_elements(other.num_elements),
-        layout(other.layout), device(other.device), cpu_ptr(nullptr),
-        device_ptr(nullptr) {
-    if (device == DataDevice::CPU) {
-      cpu_ptr = new T[rows * cols];
-      memcpy(cpu_ptr, other.cpu_ptr, num_elements);
-    } else {
-      CUDA_CHECK(cudaMalloc(&device_ptr, num_elements));
-      CUDA_CHECK(cudaMemcpy(device_ptr, other.device_ptr, num_elements,
-                            cudaMemcpyDeviceToDevice));
-    }
-  }
-
-  __host__ Matrix(T* ptr, size_t rows, size_t cols, DataLayout layout, DataDevice device): rows(rows), cols(cols), device(device), layout(layout), num_elements(sizeof(T) * rows * cols) {
-    foreign_pointer = true;
-    if (device == DataDevice::CUDA) {
-        device_ptr = ptr;
-        cpu_ptr = nullptr;
-    } else {
-        device_ptr = nullptr;
-        cpu_ptr = ptr;
-    }
+  __host__ Matrix(T* ptr, size_t rows, size_t cols, DataLayout layout, DataDevice device)
+      : Tensor<T>({rows, cols}), layout(layout) {
+    throw std::runtime_error("wont work with current implementation");
   }
 
   __host__ Matrix &operator=(const Matrix &other) {
     if (this == &other)
       return *this;
-
-    if (device == DataDevice::CPU) {
-      delete[] cpu_ptr;
-    } else {
-      CUDA_CHECK(cudaFree(device_ptr));
-    }
-
-    rows = other.rows;
-    cols = other.cols;
-    num_elements = other.num_elements;
+    Tensor<T>::operator=(other);
     layout = other.layout;
-    device = other.device;
-
-    if (device == DataDevice::CPU) {
-      cpu_ptr = new T[rows * cols];
-      memcpy(cpu_ptr, other.cpu_ptr, num_elements);
-      device_ptr = nullptr;
-    } else {
-      CUDA_CHECK(cudaMalloc(&device_ptr, num_elements));
-      CUDA_CHECK(cudaMemcpy(device_ptr, other.device_ptr, num_elements,
-                            cudaMemcpyDeviceToDevice));
-      cpu_ptr = nullptr;
-    }
-
     return *this;
   }
 
-  __host__ Matrix(Matrix &&other)
-      : cpu_ptr(nullptr), device_ptr(nullptr), rows(0), cols(0),
-        num_elements(0), layout(DataLayout::ROW_WISE), device(DataDevice::CPU) {
-    this->swap(other);
-  }
+  __host__ Matrix(Matrix &&other) : Tensor<T>(std::move(other)), layout(other.layout) {}
 
   __host__ Matrix &operator=(Matrix &&other) {
     if (this == &other)
       return *this;
-    this->swap(other);
+    Tensor<T>::operator=(std::move(other));
+    layout = other.layout;
     return *this;
   }
 
   __host__ Matrix operator+(const Matrix &other) const {
-    assert(rows == other.rows && cols == other.cols);
+    size_t rows = this->get_shape(0);
+    size_t cols = this->get_shape(1);
+    assert(rows == other.get_shape(0) && cols == other.get_shape(1));
     assert(layout == other.layout);
-    assert(device == other.device);
+    assert(this->device == other.device);
 
-    Matrix result(rows, cols, layout, device);
+    Matrix result(rows, cols, layout, this->device);
 
-    if (device == DataDevice::CPU) {
+    if (this->device == DataDevice::CPU) {
+      T* res_ptr = result.item();
+      T* this_ptr = this->item();
+      T* other_ptr = other.item();
       for (size_t i = 0; i < rows * cols; ++i) {
-        result.cpu_ptr[i] = cpu_ptr[i] + other.cpu_ptr[i];
+        res_ptr[i] = this_ptr[i] + other_ptr[i];
       }
     } else {
       dim3 block(256);
       dim3 grid((rows * cols + block.x - 1) / block.x);
-      matrix_add_kernel<T><<<grid, block>>>(device_ptr, other.device_ptr,
-                                            result.device_ptr,
-                                            num_elements / sizeof(T));
+      matrix_add_kernel<T><<<grid, block>>>(this->item(), other.item(),
+                                            result.item(),
+                                            rows * cols);
       CUDA_CHECK(cudaDeviceSynchronize());
     }
 
@@ -152,22 +78,27 @@ public:
   }
 
   __host__ Matrix operator-(const Matrix &other) const {
-    assert(rows == other.rows && cols == other.cols);
+    size_t rows = this->get_shape(0);
+    size_t cols = this->get_shape(1);
+    assert(rows == other.get_shape(0) && cols == other.get_shape(1));
     assert(layout == other.layout);
-    assert(device == other.device);
+    assert(this->device == other.device);
 
-    Matrix result(rows, cols, layout, device);
+    Matrix result(rows, cols, layout, this->device);
 
-    if (device == DataDevice::CPU) {
+    if (this->device == DataDevice::CPU) {
+      T* res_ptr = result.item();
+      T* this_ptr = this->item();
+      T* other_ptr = other.item();
       for (size_t i = 0; i < rows * cols; ++i) {
-        result.cpu_ptr[i] = cpu_ptr[i] - other.cpu_ptr[i];
+        res_ptr[i] = this_ptr[i] - other_ptr[i];
       }
     } else {
       dim3 block(256);
       dim3 grid((rows * cols + block.x - 1) / block.x);
-      matrix_sub_kernel<T><<<grid, block>>>(device_ptr, other.device_ptr,
-                                            result.device_ptr,
-                                            num_elements / sizeof(T));
+      matrix_sub_kernel<T><<<grid, block>>>(this->item(), other.item(),
+                                            result.item(),
+                                            rows * cols);
       CUDA_CHECK(cudaDeviceSynchronize());
     }
 
@@ -175,19 +106,23 @@ public:
   }
 
   __host__ Matrix &operator+=(const Matrix &other) {
-    assert(rows == other.rows && cols == other.cols);
+    size_t rows = this->get_shape(0);
+    size_t cols = this->get_shape(1);
+    assert(rows == other.get_shape(0) && cols == other.get_shape(1));
     assert(layout == other.layout);
-    assert(device == other.device);
+    assert(this->device == other.device);
 
-    if (device == DataDevice::CPU) {
+    if (this->device == DataDevice::CPU) {
+      T* this_ptr = this->item();
+      T* other_ptr = other.item();
       for (size_t i = 0; i < rows * cols; ++i) {
-        cpu_ptr[i] += other.cpu_ptr[i];
+        this_ptr[i] += other_ptr[i];
       }
     } else {
       dim3 block(256);
       dim3 grid((rows * cols + block.x - 1) / block.x);
       matrix_add_kernel<T><<<grid, block>>>(
-          device_ptr, other.device_ptr, device_ptr, num_elements / sizeof(T));
+          this->item(), other.item(), this->item(), rows * cols);
       CUDA_CHECK(cudaDeviceSynchronize());
     }
 
@@ -195,19 +130,23 @@ public:
   }
 
   __host__ Matrix &operator-=(const Matrix &other) {
-    assert(rows == other.rows && cols == other.cols);
+    size_t rows = this->get_shape(0);
+    size_t cols = this->get_shape(1);
+    assert(rows == other.get_shape(0) && cols == other.get_shape(1));
     assert(layout == other.layout);
-    assert(device == other.device);
+    assert(this->device == other.device);
 
-    if (device == DataDevice::CPU) {
+    if (this->device == DataDevice::CPU) {
+      T* this_ptr = this->item();
+      T* other_ptr = other.item();
       for (size_t i = 0; i < rows * cols; ++i) {
-        cpu_ptr[i] -= other.cpu_ptr[i];
+        this_ptr[i] -= other_ptr[i];
       }
     } else {
       dim3 block(256);
       dim3 grid((rows * cols + block.x - 1) / block.x);
       matrix_sub_kernel<T><<<grid, block>>>(
-          device_ptr, other.device_ptr, device_ptr, num_elements / sizeof(T));
+          this->item(), other.item(), this->item(), rows * cols);
       CUDA_CHECK(cudaDeviceSynchronize());
     }
 
@@ -215,118 +154,50 @@ public:
   }
 
   __host__ void swap(Matrix &other) {
-    std::swap(cpu_ptr, other.cpu_ptr);
-    std::swap(device_ptr, other.device_ptr);
+    Tensor<T>::swap(other);
     std::swap(layout, other.layout);
-    std::swap(device, other.device);
-    std::swap(rows, other.rows);
-    std::swap(cols, other.cols);
-    std::swap(num_elements, other.num_elements);
   }
 
   __host__ void fill_random(unsigned long long seed = 812ULL) {
-    if (device == DataDevice::CUDA) {
-      curandGenerator_t gen;
-      curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT);
-      curandSetPseudoRandomGeneratorSeed(gen, seed);
-      assert(sizeof(T) == sizeof(fp32));
-      curandGenerateUniform(gen, device_ptr, rows * cols);
-      // else
-      //     curandGenerateUniformDouble(gen, device_ptr, rows * cols);
-      curandDestroyGenerator(gen);
-    } else {
-      std::mt19937 gen(seed);
-      std::uniform_real_distribution<T> dis(0.0, 1.0);
-      for (size_t i = 0; i < rows * cols; i++)
-        cpu_ptr[i] = dis(gen);
-    }
-  }
-
-  __host__ void fill_const(T val) {
-    if (device == DataDevice::CUDA) {
-      T *h_ptr = new T[rows * cols];
-      for (size_t i = 0; i < rows * cols; i++)
-        h_ptr[i] = val;
-      CUDA_CHECK(
-          cudaMemcpy(device_ptr, h_ptr, num_elements, cudaMemcpyHostToDevice));
-      delete[] h_ptr;
-    } else {
-      for (size_t i = 0; i < rows * cols; i++)
-        cpu_ptr[i] = val;
-    }
-  }
-
-  __host__ void ones() { fill_const((T)1.0); }
-
-  __host__ void zeros() {
-    if (device == DataDevice::CUDA) {
-      CUDA_CHECK(cudaMemset(device_ptr, 0, num_elements));
-    } else {
-      memset(cpu_ptr, 0, num_elements);
-    }
-  }
-
-  __host__ void cpu() {
-    if (device == DataDevice::CPU)
-      return;
-
-    device = DataDevice::CPU;
-
-    cpu_ptr = new T[cols * rows];
-    CUDA_CHECK(
-        cudaMemcpy(cpu_ptr, device_ptr, num_elements, cudaMemcpyDeviceToHost));
-    CUDA_CHECK(cudaFree(device_ptr));
-
-    device_ptr = nullptr;
-  }
-
-  __host__ void cuda() {
-    if (device == DataDevice::CUDA)
-      return;
-
-    device = DataDevice::CUDA;
-
-    CUDA_CHECK(cudaMalloc(&device_ptr, num_elements));
-    CUDA_CHECK(
-        cudaMemcpy(device_ptr, cpu_ptr, num_elements, cudaMemcpyHostToDevice));
-
-    delete[] cpu_ptr;
-    cpu_ptr = nullptr;
-  }
-
-  __host__ T *item() const {
-    if (device == DataDevice::CPU) {
-      return cpu_ptr;
-    } else {
-      return device_ptr;
-    }
+    Tensor<T>::fill_random(seed);
   }
 
   __host__ void to_layout(DataLayout new_layout) {
     if (layout == new_layout)
       return;
 
-    if (device == DataDevice::CUDA) {
+    if (this->device == DataDevice::CUDA) {
       throw std::runtime_error(
           ".to_layout not implemented for DataDevice::CUDA. consider using .cpu()");
     }
 
+    size_t rows = this->get_shape(0);
+    size_t cols = this->get_shape(1);
+    T* ptr = this->item();
     T *new_buffer = new T[rows * cols];
     for (size_t i = 0; i < rows; i++) {
       for (size_t j = 0; j < cols; j++) {
         if (new_layout == DataLayout::ROW_WISE) {
           // Current is COL_WISE: i + j * rows
-          new_buffer[i * cols + j] = cpu_ptr[i + j * rows];
+          new_buffer[i * cols + j] = ptr[i + j * rows];
         } else {
           // Current is DataLayout::ROW_WISE: i * cols + j
-          new_buffer[i + j * rows] = cpu_ptr[i * cols + j];
+          new_buffer[i + j * rows] = ptr[i * cols + j];
         }
       }
     }
 
-    delete[] cpu_ptr;
-    cpu_ptr = new_buffer;
+   // If we update strides, we don't need to move data. 
+    // BUT the original implementation physicaly moved data.
+    
+    memcpy(ptr, new_buffer, rows * cols * sizeof(T));
+    delete[] new_buffer;
     layout = new_layout;
+    if (layout == DataLayout::ROW_WISE) {
+        this->compute_contiguous_strides();
+    } else {
+        this->set_col_wise_strides();
+    }
   }
 
   __host__ friend std::ostream &operator<<(std::ostream &os,
@@ -335,12 +206,14 @@ public:
       throw std::runtime_error(
           "data must be on cpu for printing. consider calling .cpu()");
     }
+    size_t rows = matrix.get_shape(0);
+    size_t cols = matrix.get_shape(1);
 
-    for (size_t i = 0; i < matrix.rows; i++) {
+    for (size_t i = 0; i < rows; i++) {
       os << "[";
-      for (size_t j = 0; j < matrix.cols; j++) {
+      for (size_t j = 0; j < cols; j++) {
         os << matrix.get(i, j);
-        if (j != matrix.cols - 1)
+        if (j != cols - 1)
           os << ", ";
       }
       os << "]\n";
@@ -349,43 +222,47 @@ public:
     return os;
   }
 
-  __host__ std::pair<size_t, size_t> shape() const { return {rows, cols}; }
+  __host__ std::pair<size_t, size_t> shape() const { 
+    return {this->get_shape(0), this->get_shape(1)}; 
+  }
 
   __host__ DataLayout get_layout() const { return layout; }
 
   __host__ T get(size_t i, size_t j) const {
-    /* row-wise getter */
-
+    size_t rows = this->get_shape(0);
+    size_t cols = this->get_shape(1);
     if (i >= rows || j >= cols) {
       throw std::out_of_range("Index out of bounds");
     }
-    if (device == DataDevice::CUDA) {
+    if (this->device == DataDevice::CUDA) {
       throw std::runtime_error(
           "data must be on cpu to get value. consider calling .cpu()");
     }
 
-    if (layout == DataLayout::ROW_WISE) {
-      return cpu_ptr[i * cols + j];
-    } else {
-      return cpu_ptr[i + j * rows];
-    }
+    return this->item()[i * this->get_stride(0) + j * this->get_stride(1)];
   }
 
   __host__ void set(size_t i, size_t j, T val) {
+    size_t rows = this->get_shape(0);
+    size_t cols = this->get_shape(1);
     if (i >= rows || j >= cols) {
       throw std::out_of_range("Index out of bounds");
     }
-    if (device == DataDevice::CUDA) {
+    if (this->device == DataDevice::CUDA) {
       throw std::runtime_error(
           "data must be on cpu to set value. consider calling .cpu()");
     }
 
-    if (layout == DataLayout::ROW_WISE) {
-      cpu_ptr[i * cols + j] = val;
-    } else {
-      cpu_ptr[i + j * rows] = val;
-    }
+    this->item()[i * this->get_stride(0) + j * this->get_stride(1)] = val;
   }
+
+private:
+    __host__ void set_col_wise_strides() {
+        // stride[0] = 1, stride[1] = rows.
+        this->set_stride(0, 1);
+        this->set_stride(1, this->get_shape(0));
+    }
 };
 
 #endif
+

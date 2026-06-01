@@ -11,6 +11,7 @@ include_directories(cu_tesseract/include)
 
 add_executable(cutesseract cu_tesseract/src/main.cu)
 add_executable(test_cutesseract tests/test_main.cu)
+add_executable(unit_tensor tests/test_tensor.cu)
 
 target_link_libraries(cutesseract curand)
 target_link_libraries(test_cutesseract curand)

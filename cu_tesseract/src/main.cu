@@ -1,5 +1,6 @@
 #include "matrix.cuh"
 #include "kernels.cuh"
+#include "ndim_kernels.cuh"
 #include "strassen_kernel.cuh"
 #include "utils.cuh"
 
@@ -93,11 +94,42 @@ test_strassen(Matrix<fp32> &A, Matrix<fp32> &B, Matrix<fp32> &C) {
   _gemm_strassen_launcher<fp32>(A, B, C);
 
   return std::chrono::high_resolution_clock::now() - start_time;
+}
 
-  verify_cpu(A, B, C);
+std::chrono::duration<double, std::milli>
+test_strided(Matrix<fp32> &A, Matrix<fp32> &B, Matrix<fp32> &C) {
+  auto start_time = std::chrono::high_resolution_clock::now();
+
+  gemm_nkm_strided<fp32>(A, B, C);
+
+  return std::chrono::high_resolution_clock::now() - start_time;
+}
+
+std::chrono::duration<double, std::milli>
+test_nd(Matrix<fp32> &A, Matrix<fp32> &B, Matrix<fp32> &C) {
+  auto start_time = std::chrono::high_resolution_clock::now();
+
+  gemm_nd<fp32>(A, B, C);
+
+  return std::chrono::high_resolution_clock::now() - start_time;
+}
+
+std::chrono::duration<double, std::milli>
+test_nd_3d(Tensor<fp32> &A, Tensor<fp32> &B, Tensor<fp32> &C) {
+  auto start_time = std::chrono::high_resolution_clock::now();
+
+  gemm_nd<fp32>(A, B, C);
+
+  return std::chrono::high_resolution_clock::now() - start_time;
 }
 
 signed main() {
+    size_t b_3d = 8, n_3d = 1024, k_3d = 1024, m_3d = 1024;
+
+    cout << "=== CuTesseract Performance Benchmark ===\n";
+    cout << "Matrix sizes: " << n << "x" << k << " and " << k << "x" << m << "\n";
+    cout << "WMMA sizes: " << n_wmma << "x" << k_wmma << " and " << k_wmma << "x" << m_wmma << "\n";
+    cout << "ND (3D) sizes: " << b_3d << "x" << n_3d << "x" << k_3d << " and " << b_3d << "x" << k_3d << "x" << m_3d << "\n\n";
 
     size_t num_tries = 16;
 
@@ -107,8 +139,12 @@ signed main() {
     vector<Matrix<fp32>*> input_matrices_a_wmma;
     vector<Matrix<fp32>*> input_matrices_b_wmma;
     vector<Matrix<fp32>*> input_matrices_c_wmma;
+    vector<Tensor<fp32>*> input_tensors_a_3d;
+    vector<Tensor<fp32>*> input_tensors_b_3d;
+    vector<Tensor<fp32>*> input_tensors_c_3d;
 
     Matrix<fp32> *A, *B, *C, *A_wmma, *B_wmma, *C_wmma;
+    Tensor<fp32> *A_3d, *B_3d, *C_3d;
 
     for (size_t i = 0; i < num_tries + 1; i++) {
         A = new Matrix<fp32>((size_t)n, (size_t)k, DataLayout::ROW_WISE, DataDevice::CUDA);
@@ -118,10 +154,22 @@ signed main() {
         B_wmma = new Matrix<fp32>((size_t)k_wmma, (size_t)m_wmma, DataLayout::ROW_WISE, DataDevice::CUDA);
         C_wmma = new Matrix<fp32>((size_t)n_wmma, (size_t)m_wmma, DataLayout::ROW_WISE, DataDevice::CUDA);
 
+        std::vector<size_t> shape_A_3d = {b_3d, n_3d, k_3d};
+        std::vector<size_t> shape_B_3d = {b_3d, k_3d, m_3d};
+        std::vector<size_t> shape_C_3d = {b_3d, n_3d, m_3d};
+        A_3d = new Tensor<fp32>(shape_A_3d);
+        B_3d = new Tensor<fp32>(shape_B_3d);
+        C_3d = new Tensor<fp32>(shape_C_3d);
+        A_3d->cuda();
+        B_3d->cuda();
+        C_3d->cuda();
+
         A->fill_random((unsigned long long)(i + 993));
         B->fill_random((unsigned long long)(i + 993));
         A_wmma->fill_random((unsigned long long)(i + 993));
         B_wmma->fill_random((unsigned long long)(i + 993));
+        A_3d->fill_random((unsigned long long)(i + 993));
+        B_3d->fill_random((unsigned long long)(i + 993));
 
         input_matrices_a.push_back(A);
         input_matrices_b.push_back(B);
@@ -129,16 +177,25 @@ signed main() {
         input_matrices_a_wmma.push_back(A_wmma);
         input_matrices_b_wmma.push_back(B_wmma);
         input_matrices_c_wmma.push_back(C_wmma);
+        input_tensors_a_3d.push_back(A_3d);
+        input_tensors_b_3d.push_back(B_3d);
+        input_tensors_c_3d.push_back(C_3d);
     }
 
     std::chrono::duration<double, std::milli> avg_block = std::chrono::duration<double, std::milli>::zero();
     std::chrono::duration<double, std::milli> avg_element = std::chrono::duration<double, std::milli>::zero();
     std::chrono::duration<double, std::milli> avg_wmma = std::chrono::duration<double, std::milli>::zero();
     std::chrono::duration<double, std::milli> avg_strassen = std::chrono::duration<double, std::milli>::zero();
+    std::chrono::duration<double, std::milli> avg_strided = std::chrono::duration<double, std::milli>::zero();
+    std::chrono::duration<double, std::milli> avg_nd = std::chrono::duration<double, std::milli>::zero();
+    std::chrono::duration<double, std::milli> avg_nd_3d = std::chrono::duration<double, std::milli>::zero();
 
     test_blockwise(*input_matrices_a[num_tries], *input_matrices_b[num_tries], *input_matrices_c[num_tries]);
     test_elementwise(*input_matrices_a[num_tries], *input_matrices_b[num_tries], *input_matrices_c[num_tries]);
     test_wmma(*input_matrices_a_wmma[num_tries], *input_matrices_b_wmma[num_tries], *input_matrices_c_wmma[num_tries]);
+    test_strided(*input_matrices_a[num_tries], *input_matrices_b[num_tries], *input_matrices_c[num_tries]);
+    test_nd(*input_matrices_a[num_tries], *input_matrices_b[num_tries], *input_matrices_c[num_tries]);
+    test_nd_3d(*input_tensors_a_3d[num_tries], *input_tensors_b_3d[num_tries], *input_tensors_c_3d[num_tries]);
 
     for (size_t i = 0; i < num_tries; i++) {
         avg_block += test_blockwise(*input_matrices_a[i], *input_matrices_b[i], *input_matrices_c[i]);
@@ -169,6 +226,30 @@ signed main() {
     }
     
     cout << "Strassen GPU multiplication duration: ~" << avg_strassen / (num_tries) << "\n";
+
+    for (size_t i = 0; i < num_tries; i++) {
+        avg_strided += test_strided(*input_matrices_a[i], *input_matrices_b[i], *input_matrices_c[i]);
+    }
+
+    cout << "Strided GPU multiplication duration: ~" << avg_strided / (num_tries) << "ms\n";
+    ms = avg_strided / (num_tries);
+    printf("TFLOPS: %.2f\n", (static_cast<std::chrono::duration<double, std::milli>>(n) * k * m * 2) / ms / 1e9);
+
+    for (size_t i = 0; i < num_tries; i++) {
+        avg_nd += test_nd(*input_matrices_a[i], *input_matrices_b[i], *input_matrices_c[i]);
+    }
+
+    cout << "ND GPU multiplication duration: ~" << avg_nd / (num_tries) << "ms\n";
+    ms = avg_nd / (num_tries);
+    printf("TFLOPS: %.2f\n", (static_cast<std::chrono::duration<double, std::milli>>(n) * k * m * 2) / ms / 1e9);
+
+    for (size_t i = 0; i < num_tries; i++) {
+        avg_nd_3d += test_nd_3d(*input_tensors_a_3d[i], *input_tensors_b_3d[i], *input_tensors_c_3d[i]);
+    }
+
+    cout << "ND (3D) GPU multiplication duration: ~" << avg_nd_3d / (num_tries) << "ms\n";
+    ms = avg_nd_3d / (num_tries);
+    printf("TFLOPS: %.2f\n", (static_cast<std::chrono::duration<double, std::milli>>(b_3d) * n_3d * k_3d * m_3d * 2) / ms / 1e9);
 
     return 0;
 }

@@ -11,4 +11,14 @@ typedef __nv_bfloat16 bf16;
 
 using std::size_t;
 
+enum class DataLayout {
+  ROW_WISE,
+  COL_WISE,
+};
+
+enum class DataDevice {
+  CPU,
+  CUDA,
+};
+
 #endif
